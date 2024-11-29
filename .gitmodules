@@ -1,0 +1,6 @@
+[submodule "rp-hal"]
+	path = rp-hal
+	url = https://github.com/rp-rs/rp-hal.git
+[submodule "pico_breadboard_kit"]
+	path = pico_breadboard_kit
+	url = https://github.com/geeekpi/pico_breadboard_kit.git
