@@ -1,0 +1,8 @@
+[package]
+name = "st7796_rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+
+[dependencies]
+rp235x-hal = {path = "../rp-hal/rp235x-hal", version = "0.2.0", features = ["binary-info", "critical-section-impl", "rt", "defmt"]}

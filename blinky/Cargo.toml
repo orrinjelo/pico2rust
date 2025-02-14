@@ -1,8 +1,8 @@
 [package]
 name = "blinky"
-version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.79"
+version = "0.1.0"
 
 [dependencies]
 cortex-m = "0.7.2"
@@ -11,7 +11,6 @@ cortex-m-rtic = "1.1.4"
 critical-section = {version = "1.2.0"}
 defmt = "0.3"
 defmt-rtt = "0.4.0"
-dht-sensor = "0.2.1"
 embedded-alloc = "0.5.1"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
@@ -26,9 +25,11 @@ panic-halt = "0.2.0"
 pio = "0.2.0"
 pio-proc = "0.2.0"
 rp235x-hal = {path = "../rp-hal/rp235x-hal", version = "0.2.0", features = ["binary-info", "critical-section-impl", "rt", "defmt"]}
+st7796s = {path = "../st7796s", version = "0.1.0"}
 usb-device = "0.3.2"
 usbd-serial = "0.2.2"
 static_cell = "2.1.0"
+
 
 [target.'cfg( target_arch = "arm" )'.dependencies]
 embassy-executor = {version = "0.5", features = ["arch-cortex-m", "executor-thread"]}
