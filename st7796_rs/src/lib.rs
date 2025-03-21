@@ -1,8 +1,6 @@
 #![no_std]
-/*
-
-*/
-use embedded_hal::spi::MODE_0;
+/**/
+use embedded_hal::spi::{SpiBus, MODE_0};
 // use fugit::RateExtU32;
 use rp235x_hal::{
     self as hal, gpio::{FunctionSpi, Pins}, pac, spi::{Disabled, Enabled, Spi, SpiDevice, State, ValidSpiPinout}, Sio
@@ -28,22 +26,27 @@ where
     interface: hal::spi::Spi<Enabled, pac::SPI0, P>,
 }
 
+pub struct RDDIDResult {
+    lcd_manufacturer_id: u8,
+    lcd_driver_version: u8,
+    lcd_driver_id: u8,
+}
+
+pub enum InstructionInput {
+    NoInput,
+}
+
+pub enum InstructionResult {
+    NoReturn,
+    RDDIDReturn(RDDIDResult),
+}
+
 impl<P> ST7796S<P> 
 where 
     P: ValidSpiPinout<pac::SPI0>,
 {
     pub fn new(pins: P) -> Self {
         let mut pac = hal::pac::Peripherals::take().unwrap();
-        // The single-cycle I/O block controls our GPIO pins
-        // let sio = hal::Sio::new(pac.SIO);
-
-        // // Set the pins to their default state
-        // let pins = hal::gpio::Pins::new(
-        //     pac.IO_BANK0,
-        //     pac.PADS_BANK0,
-        //     sio.gpio_bank0,
-        //     &mut pac.RESETS,
-        // );
 
         // Set up the watchdog driver - needed by the clock setup code
         let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
@@ -62,9 +65,6 @@ where
 
 
         // These are implicitly used by the spi driver if they are in the correct mode
-        // let spi_mosi = pins.gpio7.into_function::<hal::gpio::FunctionSpi>();
-        // let spi_miso = pins.gpio4.into_function::<hal::gpio::FunctionSpi>();
-        // let spi_sclk = pins.gpio6.into_function::<hal::gpio::FunctionSpi>();
         let s = hal::spi::Spi::new(pac.SPI0, pins).init(
             &mut pac.RESETS,
             clocks.peripheral_clock.freq(),
@@ -72,12 +72,69 @@ where
             embedded_hal::spi::MODE_0,
         );
 
+        // // Exchange the uninitialised SPI driver for an initialised one
+        // let mut spi_bus = s.init(
+        //     &mut pac.RESETS,
+        //     clocks.peripheral_clock.freq(),
+        //     16.MHz(),
+        //     embedded_hal::spi::MODE_0,
+        // );
+
         ST7796S {
             interface: s
         }
     }
 
-    // pub fn nop(&mut self) {
-    //     self.interface.send(&[0x00]);
-    // }
+    pub fn init(&mut self) {
+
+    }
+
+    pub fn exec(&mut self, command: Command, _inp: InstructionInput) -> Result<InstructionResult, u8> {
+        match command {
+            Command::NOP => self.nop(),
+            Command::SWRESET => self.swreset(),
+            Command::RDDID => {
+                self.rddid()
+            },
+            _ => Ok(InstructionResult::NoReturn)
+        }
+    }
+
+    // No operation
+    pub fn nop(&mut self) -> Result<InstructionResult, u8> {
+        match self.interface.write(&[0x00]) {
+            Ok(_x) => { Ok(InstructionResult::NoReturn) },
+            _ => { Err(0) },
+        }
+    }
+
+    // Software reset
+    pub fn swreset(&mut self) -> Result<InstructionResult, u8> {
+        match self.interface.write(&[0x01]) {
+            Ok(_x) => { Ok(InstructionResult::NoReturn) },
+            _ => { Err(1) },
+        }
+    }
+
+    // Read Display ID
+    pub fn rddid(&mut self) -> Result<InstructionResult, u8> {
+        match self.interface.write(&[0x01]) {
+            Ok(_x) => { 
+                let mut ret_words: [u8; 4] = [0, 0, 0, 0];
+                match self.interface.read(&mut ret_words) {
+                    Ok(_x) => Ok(
+                        InstructionResult::RDDIDReturn(
+                            RDDIDResult {
+                                lcd_manufacturer_id: ret_words[1],
+                                lcd_driver_version: ret_words[2],
+                                lcd_driver_id: ret_words[3],
+                            }
+                        )
+                    ),
+                    Err(_) => Err(1),
+                }
+            },
+            _ => { Err(1) },
+        }
+    }
 }
