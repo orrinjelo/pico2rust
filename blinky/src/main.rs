@@ -35,7 +35,7 @@ use rp235x_hal::{
 };
 
 // Starting display
-use st7796s::*;
+// use st7796s::*;
 
 /// Tell the Boot ROM about our application
 #[link_section = ".start_block"]
@@ -99,13 +99,13 @@ fn main() -> ! {
 
     // let mut led_rgb = pins.gpio12.into_push_pull_output();
 
-    let sclk = pins.gpio2.into_function::<FunctionSpi>();
-    let mosi = pins.gpio3.into_function::<FunctionSpi>();
-    let miso = pins.gpio4.into_function::<FunctionSpi>();
+    // let sclk = pins.gpio2.into_function::<FunctionSpi>();
+    // let mosi = pins.gpio3.into_function::<FunctionSpi>();
+    // let miso = pins.gpio4.into_function::<FunctionSpi>();
     // let spi_device = pac.SPI0;
     // let spi_pin_layout = (mosi, sclk);
-    let spi_bus = hal::spi::Spi::<_, _, _, 8>::new(
-        pac.SPI0, (mosi, miso, sclk));
+    // let spi_bus = hal::spi::Spi::<_, _, _, 8>::new(
+    //     pac.SPI0, (mosi, miso, sclk));
 
     // Configure some LED pins
     let mut led_pin_d1 = pins.gpio16.into_push_pull_output();
@@ -114,17 +114,17 @@ fn main() -> ! {
     // LCD
     // let mut lcd = ST7796::new(Some(din), Some(rst), None, 480, 320);
     // Exchange the uninitialised SPI driver for an initialised one
-    let mut spi_bus = spi_bus.init(
-        &mut pac.RESETS,
-        clocks.peripheral_clock.freq(),
-        16.MHz(),
-        embedded_hal::spi::MODE_0,
-    );
+    // let mut spi_bus = spi_bus.init(
+    //     &mut pac.RESETS,
+    //     clocks.peripheral_clock.freq(),
+    //     16.MHz(),
+    //     embedded_hal::spi::MODE_0,
+    // );
 
     // Do a read+write at the same time. Data in `buffer` will be replaced with
     // the data read from the SPI device.
     // let mut buffer: [u8; 4] = [1, 2, 3, 4];
-    display_send(spi_bus, &[1u8,2u8,3u8,4u8,0u8,0u8,0u8,0u8]);
+    // display_send(spi_bus, &[1u8,2u8,3u8,4u8,0u8,0u8,0u8,0u8]);
 
     // loop {
     //     hal::arch::wfi();
@@ -139,17 +139,17 @@ fn main() -> ! {
     }
 }
 
-pub fn display_send(mut spi_bus: Spi<Enabled, SPI0, (Pin<Gpio3, FunctionSpi, PullDown>, Pin<Gpio4, FunctionSpi, PullDown>, Pin<Gpio2, FunctionSpi, PullDown>)>, &buffer: &[u8; 8]) {
-    let outp: [u8; 8] = [0; 8];
-    let mut buff = buffer;
-    let transfer_success = SpiBus::transfer(&mut spi_bus, &mut buff, &outp);
-    #[allow(clippy::single_match)]
-    match transfer_success {
-        Ok(_) => {}  // Handle success
-        Err(_) => {} // handle errors
-    };
+// pub fn display_send(mut spi_bus: Spi<Enabled, SPI0, (Pin<Gpio3, FunctionSpi, PullDown>, Pin<Gpio4, FunctionSpi, PullDown>, Pin<Gpio2, FunctionSpi, PullDown>)>, &buffer: &[u8; 8]) {
+//     let outp: [u8; 8] = [0; 8];
+//     let mut buff = buffer;
+//     let transfer_success = SpiBus::transfer(&mut spi_bus, &mut buff, &outp);
+//     #[allow(clippy::single_match)]
+//     match transfer_success {
+//         Ok(_) => {}  // Handle success
+//         Err(_) => {} // handle errors
+//     };
 
-}
+// }
 
 /// Program metadata for `picotool info`
 #[link_section = ".bi_entries"]
