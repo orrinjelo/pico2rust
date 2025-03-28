@@ -3,9 +3,11 @@
 
 /**/
 use embedded_hal::spi::{
-    SpiBus, 
+    SpiBus,
     // MODE_0
 };
+use embedded_hal::digital::OutputPin;
+
 // use fugit::RateExtU32;
 use rp235x_hal::{
     self as hal, 
@@ -19,8 +21,11 @@ use rp235x_hal::{
         // State, 
         ValidSpiPinout
     }, 
-    // Sio
+    // Sio,
+    Timer,
 };
+
+use embedded_hal::delay::DelayNs;
 
 // Some things we need
 // use embedded_hal_0_2::prelude::*;
@@ -35,11 +40,17 @@ use crate::instruction::Command;
 /// Adjust if your board has a different frequency
 // const XTAL_FREQ_HZ: u32 = 12_000_000u32;
 
-pub struct ST7796S<P>
+pub struct ST7796S<P, CS, DC, T>
 where 
     P: ValidSpiPinout<pac::SPI0>,
+    CS: OutputPin,
+    DC: OutputPin,
+    T: embedded_hal::delay::DelayNs
 {
     interface: hal::spi::Spi<Enabled, pac::SPI0, P>,
+    cs: CS,
+    dc: DC,
+    timer: T,
 }
 
 #[allow(dead_code)]
@@ -160,15 +171,21 @@ pub fn dummy_debug_info(_s: &str) {
     // Do nothing.
 }
 
-impl<P> ST7796S<P> 
+impl<P, CS, DC, T> ST7796S<P, CS, DC, T> 
 where 
     P: ValidSpiPinout<pac::SPI0>,
+    CS: OutputPin,
+    DC: OutputPin,
+    T: embedded_hal::delay::DelayNs,
 {
     pub fn new<F: FnMut(&str)>(
-            pins: P, 
+            pins: P,
             clocks: rp235x_hal::clocks::ClocksManager,
             spi0: pac::SPI0,
             resets: &mut pac::RESETS,
+            cs: CS,
+            dc: DC,
+            timer: T,
             mut debug_cb: F) -> Self {
 
         debug_cb("Initializing SPI device.\r\n");
@@ -176,45 +193,75 @@ where
         let s = hal::spi::Spi::new(spi0, pins).init(
             resets,
             clocks.peripheral_clock.freq(),
-            62500.kHz(),
+            // 62500.kHz(),
             // 16.MHz(),
+            8.MHz(),
             embedded_hal::spi::MODE_0,
         );
 
         ST7796S {
             interface: s,
+            cs: cs,
+            dc: dc,
+            timer: timer,
         }
     }
 
     pub fn init(&mut self) {
-        self.interface.write(&[0xCF, 0x00, 0x83, 0x30]).unwrap();               // ?
-        self.interface.write(&[0xED, 0x64, 0x03, 0x12, 0x81]).unwrap();         // DOCA: display output ctrl adjust
-        self.interface.write(&[0xE8, 0x85, 0x01, 0x79]).unwrap();               // DOCA: display output ctrl adjust
-        self.interface.write(&[0xCB, 0x39, 0x2C, 0x00, 0x34, 0x02]).unwrap();   // ?
-        self.interface.write(&[0xF7, 0x20]).unwrap();                           // ?
-        self.interface.write(&[0xEA, 0x00, 0x00]).unwrap();                     // DOCA: display output ctrl adjust
-        self.interface.write(&[0xC0, 0x26]).unwrap();	                  	   // Power control
-        self.interface.write(&[0xC1, 0x11]).unwrap();	                  	   // Power control 
-        self.interface.write(&[0xC5, 0x35, 0x3E]).unwrap();                     // VCOM control
-        self.interface.write(&[0xC7, 0xBE]).unwrap();		                   // VCM Offset: vcom offset register
-        self.interface.write(&[0x36, 0x28]).unwrap();		                   // Memory Access Control
-        self.interface.write(&[0x3A, 0x05]).unwrap();		                   // COLMOD: Interface pixel format
-        self.interface.write(&[0xB1, 0x00, 0x1B]).unwrap();                     // FRMCTR1: frame rate control
-        self.interface.write(&[0xB1, 0x00, 0x00]).unwrap();                     // FRMCTR1: frame rate control
-        self.interface.write(&[0xF2, 0x08]).unwrap();                           // ?
-        self.interface.write(&[0x26, 0x01]).unwrap();                           // ?
-        self.interface.write(&[0xE0, 0x1F, 0x1A, 0x18, 0x0A, 0x0F, 0x06, 0x45, 0x87, 0x32, 0x0A, 0x07, 0x02, 0x07, 0x05, 0x00]).unwrap(); // PGC: positive gamma control
-        self.interface.write(&[0xE1, 0x00, 0x25, 0x27, 0x05, 0x10, 0x09, 0x3A, 0x78, 0x4D, 0x05, 0x18, 0x0D, 0x38, 0x3A, 0x1F]).unwrap(); // NGC: negative gamma control
-        self.interface.write(&[0x2A, 0x00, 0x00, 0x00, 0xEF]).unwrap();         // CASET: column address set
-        self.interface.write(&[0x2B, 0x00, 0x00, 0x01, 0x3f]).unwrap();         // RASET: row address set
-        self.interface.write(&[0x2C, 0]).unwrap();                              // RAMWR: memory write
-        self.interface.write(&[0xB7, 0x07]).unwrap();                           // EM: entry mode wet
-        self.interface.write(&[0xB6, 0x0A, 0x82, 0x27, 0x00]).unwrap();         // DFC: display function control
-        self.interface.write(&[0x11, 0]).unwrap();                              // SLP: sleep out
-        self.interface.write(&[0x29, 0]).unwrap();                              // DISPON: display on
-        self.interface.write(&[0, 0]).unwrap();                                 // NOP: no operation
+        // self.write_command(&[0xCF, 0x00, 0x83, 0x30]);               // ?
+        // self.write_command(&[0xED, 0x64, 0x03, 0x12, 0x81]);         // DOCA: display output ctrl adjust
+        // self.write_command(&[0xE8, 0x85, 0x01, 0x79]);               // DOCA: display output ctrl adjust
+        // self.write_command(&[0xCB, 0x39, 0x2C, 0x00, 0x34, 0x02]);   // ?
+        // self.write_command(&[0xF7, 0x20]);                           // ?
+        // self.write_command(&[0xEA, 0x00, 0x00]);                     // DOCA: display output ctrl adjust
+        // self.write_command(&[0xC0, 0x26]);	                  	     // Power control
+        // self.write_command(&[0xC1, 0x11]);	                  	     // Power control 
+        // self.write_command(&[0xC5, 0x35, 0x3E]);                     // VCOM control
+        // self.write_command(&[0xC7, 0xBE]);		                     // VCM Offset: vcom offset register
+        // self.write_command(&[0x36, 0x28]);		                     // Memory Access Control
+        // self.write_command(&[0x3A, 0x05]);		                     // COLMOD: Interface pixel format
+        // self.write_command(&[0xB1, 0x00, 0x1B]);                     // FRMCTR1: frame rate control
+        // self.write_command(&[0xB1, 0x00, 0x00]);                     // FRMCTR1: frame rate control
+        // self.write_command(&[0xF2, 0x08]);                           // ?
+        // self.write_command(&[0x26, 0x01]);                           // ?
+        // self.write_command(&[0xE0, 0x1F, 0x1A, 0x18, 0x0A, 0x0F, 0x06, 0x45, 0x87, 0x32, 0x0A, 0x07, 0x02, 0x07, 0x05, 0x00]); // PGC: positive gamma control
+        // self.write_command(&[0xE1, 0x00, 0x25, 0x27, 0x05, 0x10, 0x09, 0x3A, 0x78, 0x4D, 0x05, 0x18, 0x0D, 0x38, 0x3A, 0x1F]); // NGC: negative gamma control
+        // self.write_command(&[0x2A, 0x00, 0x00, 0x00, 0xEF]);         // CASET: column address set
+        // self.write_command(&[0x2B, 0x00, 0x00, 0x01, 0x3f]);         // RASET: row address set
+        // self.write_command(&[0x2C, 0]);                              // RAMWR: memory write
+        // self.write_command(&[0xB7, 0x07]);                           // EM: entry mode wet
+        // self.write_command(&[0xB6, 0x0A, 0x82, 0x27, 0x00]);         // DFC: display function control
+        // self.write_command(&[0x11, 0]);                              // SLP: sleep out
+        // self.write_command(&[0x29, 0]);                              // DISPON: display on
+        // self.write_command(&[0, 0]);                                 // NOP: no operation
+
+        self.write_command(0x11);          // Sleep out
+        self.timer.delay_ms(120);
+
+        self.write_command(0x3A);          // Set pixel format
+        self.write_data(&[0x55]);              // 16-bit color
+        self.timer.delay_ms(120);
+
+        self.write_command(0x36);          // Memory data access control
+        self.write_data(&[0x00]);               // Row/col order
+        self.timer.delay_ms(120);
+
+        self.write_command(0x29);          // Display on
+        self.timer.delay_ms(10);
+        self.timer.delay_ms(120);
     }
 
+    pub fn write_command(&mut self, cmd: u8) {
+        self.cs.set_low().unwrap();
+        self.interface.write(&[cmd]).unwrap();
+        self.cs.set_high().unwrap();
+    }
+
+    fn write_data(&mut self, data: &[u8]) {
+        self.dc.set_high().unwrap();        // Data mode
+        self.interface.write(data).unwrap();
+    }
+    
     pub fn exec(&mut self, command: Command, _inp: InstructionInput) -> Result<InstructionResult, u8> {
         match command {
             Command::NOP => self.nop(),
@@ -243,27 +290,37 @@ where
 
     // No operation
     pub fn nop(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x00]) {
+        self.cs.set_low().unwrap();
+        let ret = match self.interface.write(&[0x00]) {
             Ok(_x) => { Ok(InstructionResult::NoReturn) },
             _ => { Err(0) },
-        }
+        };
+        self.cs.set_high().unwrap();
+        ret
     }
 
     // Software reset
     pub fn swreset(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x01]) {
+        self.cs.set_low().unwrap();
+        let ret = match self.interface.write(&[0x01]) {
             Ok(_x) => { Ok(InstructionResult::NoReturn) },
             _ => { Err(1) },
-        }
+        };
+        self.cs.set_high().unwrap();
+        ret
     }
 
     // Read Display ID
     pub fn rddid(&mut self) -> Result<InstructionResult, u8> {
+        self.cs.set_low().unwrap();
+        self.dc.set_low().unwrap();
         let mut ret_words: [u8; 5] = [0x04, 0, 0, 0, 0];
-        match self.interface.write(&[0x04]) {
+        let ret = match self.interface.write(&[0x04]) {
             Ok(_x) => { 
-                // let mut ret_words: [u8; 4] = [0, 0, 0, 0];
-                match self.interface.read(&mut ret_words) {
+                let mut buffer: [u8; 4] = [0, 0, 0, 0];
+                self.dc.set_high().unwrap();
+                // match self.interface.read(&mut ret_words) {
+                match self.interface.transfer(&mut buffer, &[0u8]) {
                     Ok(_x) => Ok(
                         InstructionResult::RDDIDReturn(
                             RDDIDResult {
@@ -277,7 +334,31 @@ where
                 }
             },
             _ => { Err(3) },
-        }
+        };
+        self.cs.set_high().unwrap();
+        ret
+    }
+
+    pub fn read_id(&mut self) -> [u8; 4] {
+        let mut buffer = [0u8; 4];
+
+        // Select the display
+        self.cs.set_low().unwrap();
+        
+        // Send the RDDID command
+        self.dc.set_low().unwrap();  // Command mode
+        self.interface.write(&[0x04]).unwrap();
+        self.timer.delay_ms(10);
+
+        // Read 4 bytes of ID
+        self.dc.set_high().unwrap();  // Data mode
+        self.interface.transfer(&mut buffer, &[0x00, 0x00, 0x00, 0x00]).unwrap();
+
+        // Deselect the display
+        self.cs.set_high().unwrap();
+        self.timer.delay_ms(10);
+
+        buffer
     }
 
     // Read Number of the Errors on DSI

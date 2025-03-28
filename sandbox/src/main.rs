@@ -110,14 +110,15 @@ fn main() -> ! {
     let spi_mosi = pins.gpio3.into_function::<hal::gpio::FunctionSpi>();
     let spi_miso = pins.gpio4.into_function::<hal::gpio::FunctionSpi>();
     let spi_sclk = pins.gpio2.into_function::<hal::gpio::FunctionSpi>();
-    let mut chip_select = pins.gpio5.into_push_pull_output();
+    let cs: rp235x_hal::gpio::Pin<_, _, _> = pins.gpio5.into_push_pull_output();
+    let dc = pins.gpio6.into_push_pull_output();
+    let _rst = pins.gpio7.into_push_pull_output();
 
     let spi_pins = (spi_mosi, spi_miso, spi_sclk);
     let mut led_pin_d1 = pins.gpio16.into_push_pull_output();
 
     uart.write_str("Creating display SPI...\r\n").unwrap();
-    let mut display = ST7796S::new(spi_pins, clocks, pac.SPI0, &mut pac.RESETS, |s: &str| { uart.write_str(s).unwrap(); });
-    chip_select.set_low().unwrap();
+    let mut display = ST7796S::new(spi_pins, clocks, pac.SPI0, &mut pac.RESETS, cs, dc, timer,  |s: &str| { uart.write_str(s).unwrap(); });
     display.init();
     uart.write_str("Display SPI initialized\r\n").unwrap();
 
@@ -137,8 +138,9 @@ fn main() -> ! {
         },
     }
 
-    display.dispon().unwrap();
-
+    // Try alternative
+    let id = display.read_id();
+    uart.write_fmt(format_args!("Display ID: {:?}\r\n", id)).unwrap();
     
     match display.loopback_test() {
         Ok(_) => {
