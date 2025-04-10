@@ -32,7 +32,7 @@ use embedded_hal::{
     delay::DelayNs,
     // spi::SpiBus
 };
-use embedded_hal::digital::OutputPin;
+// use embedded_hal::digital::OutputPin;
 
 // use embedded_hal::spi::MODE_0;
 // use fugit::RateExtU32;
@@ -112,55 +112,57 @@ fn main() -> ! {
     let spi_sclk = pins.gpio2.into_function::<hal::gpio::FunctionSpi>();
     let cs: rp235x_hal::gpio::Pin<_, _, _> = pins.gpio5.into_push_pull_output();
     let dc = pins.gpio6.into_push_pull_output();
-    let _rst = pins.gpio7.into_push_pull_output();
+    let rst = pins.gpio7.into_push_pull_output();
 
     let spi_pins = (spi_mosi, spi_miso, spi_sclk);
-    let mut led_pin_d1 = pins.gpio16.into_push_pull_output();
+    // let led_pin_d1 = pins.gpio16.into_push_pull_output();
 
     uart.write_str("Creating display SPI...\r\n").unwrap();
-    let mut display = ST7796S::new(spi_pins, clocks, pac.SPI0, &mut pac.RESETS, cs, dc, timer,  |s: &str| { uart.write_str(s).unwrap(); });
+    let mut display = ST7796S::new(spi_pins, clocks, pac.SPI0, &mut pac.RESETS, cs, dc, rst, timer, |s: &str| { uart.write_str(s).unwrap(); });
     display.init();
-    uart.write_str("Display SPI initialized\r\n").unwrap();
 
-    match display.rddid() {
-        Ok(x) => {
-            match x {
-                InstructionResult::RDDIDReturn(did) => {
-                    uart.write_fmt(format_args!("DID: {:?}\r\n", did)).unwrap()
-                },
-                _ => {
-                    uart.write_str("Invalid RDDID return.\r\n").unwrap()
-                },
-            }
-        },
-        _ => {
-            uart.write_str("Error on RDDID.\r\n").unwrap()
-        },
-    }
+    let rdid = display.rddid().unwrap();
+    uart.write_fmt(format_args!("Display ID: {:?}\r\n", rdid)).unwrap();
 
-    // Try alternative
-    let id = display.read_id();
-    uart.write_fmt(format_args!("Display ID: {:?}\r\n", id)).unwrap();
-    
-    match display.loopback_test() {
-        Ok(_) => {
-            uart.write_str("Loopback test succeeded. \r\n").unwrap();
-        },
-        Err(_) => {
-            uart.write_str("Loopback test failed. \r\n").unwrap();
-        }
-    }
+    let rdst = display.rddst().unwrap();
+    uart.write_fmt(format_args!("Display Status: {:?}\r\n", rdst)).unwrap();
 
-    // loop {
-    //     hal::arch::wfi();
+    // match display.loopback_test() {
+    //     Ok(_) => {
+    //         uart.write_str("Loopback test succeeded. \r\n").unwrap();
+    //     },
+    //     Err(_) => {
+    //         uart.write_str("Loopback test failed. \r\n").unwrap();
+    //     }
     // }
+
+    // cs.set_low().unwrap();
+        
+    // Send the RDDID command
+    // self.dc.set_low().unwrap();  // Command mode
+    // self.interface.write(&[0x04]).unwrap();
+    // self.timer.delay_ms(10);
+
+    // // Read 4 bytes of ID
+    // self.dc.set_high().unwrap();  // Data mode
+    // self.interface.transfer(&mut buffer, &[0x00, 0x00, 0x00, 0x00]).unwrap();
+
+    // // Deselect the display
+    // self.cs.set_high().unwrap();
+    // self.timer.delay_ms(10);
+
     loop {
-        uart.write_str("LED blink!\r\n").unwrap();
-        display.wrdisbv(0xff).unwrap();
-        led_pin_d1.set_high().unwrap();
+        // hal::arch::wfi();
+        // uart.write_str("LED blink!\r\n").unwrap();
+        // display.wrdisbv(0xff).unwrap();
+        // led_pin_d1.set_high().unwrap();
+        // dc.set_low().unwrap();
+        display.dispoff().unwrap();
         timer.delay_ms(500);
-        display.wrdisbv(0x00).unwrap();
-        led_pin_d1.set_low().unwrap();
+        // display.wrdisbv(0x00).unwrap();
+        // led_pin_d1.set_low().unwrap();
+        // dc.set_high().unwrap();
+        display.dispon().unwrap();
         timer.delay_ms(500);
     }
 }

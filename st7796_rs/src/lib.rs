@@ -22,10 +22,10 @@ use rp235x_hal::{
         ValidSpiPinout
     }, 
     // Sio,
-    Timer,
+    // Timer,
 };
 
-use embedded_hal::delay::DelayNs;
+// use embedded_hal::delay::DelayNs;
 
 // Some things we need
 // use embedded_hal_0_2::prelude::*;
@@ -40,16 +40,18 @@ use crate::instruction::Command;
 /// Adjust if your board has a different frequency
 // const XTAL_FREQ_HZ: u32 = 12_000_000u32;
 
-pub struct ST7796S<P, CS, DC, T>
+pub struct ST7796S<P, CS, DC, RST, T>
 where 
     P: ValidSpiPinout<pac::SPI0>,
     CS: OutputPin,
     DC: OutputPin,
+    RST: OutputPin,
     T: embedded_hal::delay::DelayNs
 {
     interface: hal::spi::Spi<Enabled, pac::SPI0, P>,
     cs: CS,
     dc: DC,
+    rst: RST,
     timer: T,
 }
 
@@ -159,6 +161,7 @@ pub enum InstructionInput {
     NoInput,
 }
 
+#[derive(Debug)]
 pub enum InstructionResult {
     NoReturn,
     RDDIDReturn(RDDIDResult),
@@ -171,11 +174,12 @@ pub fn dummy_debug_info(_s: &str) {
     // Do nothing.
 }
 
-impl<P, CS, DC, T> ST7796S<P, CS, DC, T> 
+impl<P, CS, DC, RST, T> ST7796S<P, CS, DC, RST, T> 
 where 
     P: ValidSpiPinout<pac::SPI0>,
     CS: OutputPin,
     DC: OutputPin,
+    RST: OutputPin,
     T: embedded_hal::delay::DelayNs,
 {
     pub fn new<F: FnMut(&str)>(
@@ -185,6 +189,7 @@ where
             resets: &mut pac::RESETS,
             cs: CS,
             dc: DC,
+            rst: RST,
             timer: T,
             mut debug_cb: F) -> Self {
 
@@ -193,9 +198,9 @@ where
         let s = hal::spi::Spi::new(spi0, pins).init(
             resets,
             clocks.peripheral_clock.freq(),
-            // 62500.kHz(),
+            62500.kHz(),
             // 16.MHz(),
-            8.MHz(),
+            // 100_000.kHz(),
             embedded_hal::spi::MODE_0,
         );
 
@@ -203,63 +208,83 @@ where
             interface: s,
             cs: cs,
             dc: dc,
+            rst: rst,
             timer: timer,
         }
     }
 
     pub fn init(&mut self) {
-        // self.write_command(&[0xCF, 0x00, 0x83, 0x30]);               // ?
-        // self.write_command(&[0xED, 0x64, 0x03, 0x12, 0x81]);         // DOCA: display output ctrl adjust
-        // self.write_command(&[0xE8, 0x85, 0x01, 0x79]);               // DOCA: display output ctrl adjust
-        // self.write_command(&[0xCB, 0x39, 0x2C, 0x00, 0x34, 0x02]);   // ?
-        // self.write_command(&[0xF7, 0x20]);                           // ?
-        // self.write_command(&[0xEA, 0x00, 0x00]);                     // DOCA: display output ctrl adjust
-        // self.write_command(&[0xC0, 0x26]);	                  	     // Power control
-        // self.write_command(&[0xC1, 0x11]);	                  	     // Power control 
-        // self.write_command(&[0xC5, 0x35, 0x3E]);                     // VCOM control
-        // self.write_command(&[0xC7, 0xBE]);		                     // VCM Offset: vcom offset register
-        // self.write_command(&[0x36, 0x28]);		                     // Memory Access Control
-        // self.write_command(&[0x3A, 0x05]);		                     // COLMOD: Interface pixel format
-        // self.write_command(&[0xB1, 0x00, 0x1B]);                     // FRMCTR1: frame rate control
-        // self.write_command(&[0xB1, 0x00, 0x00]);                     // FRMCTR1: frame rate control
-        // self.write_command(&[0xF2, 0x08]);                           // ?
-        // self.write_command(&[0x26, 0x01]);                           // ?
-        // self.write_command(&[0xE0, 0x1F, 0x1A, 0x18, 0x0A, 0x0F, 0x06, 0x45, 0x87, 0x32, 0x0A, 0x07, 0x02, 0x07, 0x05, 0x00]); // PGC: positive gamma control
-        // self.write_command(&[0xE1, 0x00, 0x25, 0x27, 0x05, 0x10, 0x09, 0x3A, 0x78, 0x4D, 0x05, 0x18, 0x0D, 0x38, 0x3A, 0x1F]); // NGC: negative gamma control
-        // self.write_command(&[0x2A, 0x00, 0x00, 0x00, 0xEF]);         // CASET: column address set
-        // self.write_command(&[0x2B, 0x00, 0x00, 0x01, 0x3f]);         // RASET: row address set
-        // self.write_command(&[0x2C, 0]);                              // RAMWR: memory write
-        // self.write_command(&[0xB7, 0x07]);                           // EM: entry mode wet
-        // self.write_command(&[0xB6, 0x0A, 0x82, 0x27, 0x00]);         // DFC: display function control
-        // self.write_command(&[0x11, 0]);                              // SLP: sleep out
-        // self.write_command(&[0x29, 0]);                              // DISPON: display on
-        // self.write_command(&[0, 0]);                                 // NOP: no operation
 
-        self.write_command(0x11);          // Sleep out
-        self.timer.delay_ms(120);
+        self.reset_pin();
 
-        self.write_command(0x3A);          // Set pixel format
-        self.write_data(&[0x55]);              // 16-bit color
-        self.timer.delay_ms(120);
-
-        self.write_command(0x36);          // Memory data access control
-        self.write_data(&[0x00]);               // Row/col order
-        self.timer.delay_ms(120);
-
-        self.write_command(0x29);          // Display on
+        // 2. Software Reset
+        self.swreset().unwrap();
         self.timer.delay_ms(10);
+
+        // 3. Sleep Out
+        self.write_command(0x11); // SLPOUT
         self.timer.delay_ms(120);
+
+        // 4. Display ON
+        self.write_command(0x29); // DISPON
+        self.timer.delay_ms(20);
+
+        // 5. Set pixel format
+        self.write_command(0x3A); 
+        self.write_data(&[0x55]); // 16-bit color (RGB565)
+
+        // 6. Set memory access control (optional, orientation)
+        self.write_command(0x36); 
+        self.write_data(&[0x00]); // Row/column order (adjust as needed)
+
+        self.write_command(0x2A);
+        self.write_data(&[0x00, 0x00, 0x00, 0xEF]);         // CASET: column address set
+        self.write_command(0x2B);
+        self.write_data(&[0x00, 0x00, 0x01, 0xDF]);         // RASET: row address set
+        self.write_command(0x2C);
+        for _ in 0..(479*319) {
+            // self.write_data(&[0xff, 0xff])
+            self.write_data(&[0x00, 0x00])
+        }
+
+        // self.write_command(0x29);          // Display on
+        // self.timer.delay_ms(10);
+        // self.timer.delay_ms(120);
     }
 
-    pub fn write_command(&mut self, cmd: u8) {
+    // Helper function to write a command to the SPI interface
+    fn write_command(&mut self, cmd: u8) {
         self.cs.set_low().unwrap();
+        self.dc.set_low().unwrap();
         self.interface.write(&[cmd]).unwrap();
         self.cs.set_high().unwrap();
     }
 
+    // Helper function to write data to the SPI interface
     fn write_data(&mut self, data: &[u8]) {
-        self.dc.set_high().unwrap();        // Data mode
+        self.cs.set_low().unwrap();
+        self.dc.set_high().unwrap();
         self.interface.write(data).unwrap();
+        self.cs.set_high().unwrap();
+    }
+
+    #[allow(dead_code)]
+    // Helper function to read data from the SPI interface
+    fn read_data(&mut self, data: &mut [u8]) {
+        self.cs.set_low().unwrap();
+        self.dc.set_high().unwrap();
+        self.interface.read(data).unwrap();
+        self.cs.set_high().unwrap();
+    }
+
+    // Toggle the reset pin
+    fn reset_pin(&mut self) {
+        self.rst.set_high().unwrap();
+        self.timer.delay_ms(50);
+        self.rst.set_low().unwrap();
+        self.timer.delay_ms(50);
+        self.rst.set_high().unwrap();
+        self.timer.delay_ms(120);
     }
     
     pub fn exec(&mut self, command: Command, _inp: InstructionInput) -> Result<InstructionResult, u8> {
@@ -273,6 +298,8 @@ where
         }
     }
 
+    #[cold]
+    // Loop back test. Kind of doesn't work.
     pub fn loopback_test(&mut self) -> Result<InstructionResult, u8> {
         let tx_buffer: [u8; 4]  = [0x00, 0xAA, 0xFF, 0x55];
         let mut rx_buffer: [u8; 4] = [0u8; 4];
@@ -290,230 +317,220 @@ where
 
     // No operation
     pub fn nop(&mut self) -> Result<InstructionResult, u8> {
-        self.cs.set_low().unwrap();
-        let ret = match self.interface.write(&[0x00]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(0) },
-        };
-        self.cs.set_high().unwrap();
-        ret
+        self.write_command(Command::NOP.into());
+        Ok(InstructionResult::NoReturn)
     }
 
     // Software reset
     pub fn swreset(&mut self) -> Result<InstructionResult, u8> {
-        self.cs.set_low().unwrap();
-        let ret = match self.interface.write(&[0x01]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        };
-        self.cs.set_high().unwrap();
-        ret
+        self.write_command(Command::SWRESET.into());
+        Ok(InstructionResult::NoReturn)
     }
 
     // Read Display ID
+    #[cold]
     pub fn rddid(&mut self) -> Result<InstructionResult, u8> {
-        self.cs.set_low().unwrap();
-        self.dc.set_low().unwrap();
-        let mut ret_words: [u8; 5] = [0x04, 0, 0, 0, 0];
-        let ret = match self.interface.write(&[0x04]) {
-            Ok(_x) => { 
-                let mut buffer: [u8; 4] = [0, 0, 0, 0];
-                self.dc.set_high().unwrap();
-                // match self.interface.read(&mut ret_words) {
-                match self.interface.transfer(&mut buffer, &[0u8]) {
-                    Ok(_x) => Ok(
-                        InstructionResult::RDDIDReturn(
-                            RDDIDResult {
-                                lcd_manufacturer_id: ret_words[1],
-                                lcd_driver_version: ret_words[2],
-                                lcd_driver_id: ret_words[3],
-                            }
-                        )
-                    ),
-                    Err(_) => Err(2),
+        self.write_command(Command::RDDID.into());
+        let mut buffer: [u8; 4] = [0, 0, 0, 0];
+        self.read_data(&mut buffer);
+        Ok(
+            InstructionResult::RDDIDReturn(
+                RDDIDResult {
+                    lcd_manufacturer_id: buffer[1],
+                    lcd_driver_version: buffer[2],
+                    lcd_driver_id: buffer[3],
                 }
-            },
-            _ => { Err(3) },
-        };
-        self.cs.set_high().unwrap();
-        ret
+            )
+        )
     }
 
-    pub fn read_id(&mut self) -> [u8; 4] {
-        let mut buffer = [0u8; 4];
+    // // Alternative implementation of rddid
+    // pub fn read_id(&mut self) -> [u8; 4] {
+    //     let mut buffer = [0u8; 4];
 
-        // Select the display
-        self.cs.set_low().unwrap();
+    //     // Select the display
+    //     self.cs.set_low().unwrap();
+    //     self.dc.set_low().unwrap();  // Command mode
+    //     self.timer.delay_ms(10);
         
-        // Send the RDDID command
-        self.dc.set_low().unwrap();  // Command mode
-        self.interface.write(&[0x04]).unwrap();
-        self.timer.delay_ms(10);
+    //     // Send the RDDID command
+    //     self.interface.write(&[0x04]).unwrap();
+    //     self.timer.delay_ms(10);
+    //     self.cs.set_high().unwrap();
 
-        // Read 4 bytes of ID
-        self.dc.set_high().unwrap();  // Data mode
-        self.interface.transfer(&mut buffer, &[0x00, 0x00, 0x00, 0x00]).unwrap();
+    //     // Read 4 bytes of ID
+    //     self.dc.set_high().unwrap();  // Data mode
+    //     self.cs.set_low().unwrap();
+    //     self.timer.delay_ms(100);
 
-        // Deselect the display
-        self.cs.set_high().unwrap();
-        self.timer.delay_ms(10);
+    //     self.interface.transfer(&mut buffer, &[0x00, 0x00, 0x00, 0x00]).unwrap();
+    //     // self.interface.read(&mut buffer).unwrap();
 
-        buffer
-    }
+    //     self.timer.delay_ms(10);
+
+    //     // Deselect the display
+    //     self.cs.set_high().unwrap();
+
+    //     buffer
+    // }
+
+    // pub fn read_disp(&mut self) -> [u8; 4] {
+    //     let mut buffer = [0x00; 4]; // Buffer to store response
+
+    //     self.dc.set_low().unwrap();    // Set DC LOW for command mode
+    //     self.cs.set_low().unwrap();    // Select the display
+    //     self.timer.delay_ms(10);
+
+    //     self.interface.write(&mut [0x09]).unwrap();  // Send RDDST command (0x09)
+    //     self.timer.delay_ms(10);
+    //     self.cs.set_high().unwrap();   // Deselect display
+    //     self.timer.delay_ms(10);
+
+    //     self.dc.set_high().unwrap();   // Set DC HIGH for data mode
+    //     self.cs.set_low().unwrap();    // Select display
+    //     self.timer.delay_ms(100);
+
+    //     self.interface.transfer(&mut buffer, &[0x00, 0x00, 0x00, 0x00]).unwrap();
+    //     // self.interface.read(&mut buffer).unwrap();  // Read 4 bytes of status data
+    //     self.timer.delay_ms(10);
+    //     self.cs.set_high().unwrap();   // Deselect display
+
+    //     buffer
+    // }
 
     // Read Number of the Errors on DSI
+    #[cold]
     pub fn rnedsi(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x05]) {
-            Ok(_x) => { 
-                let mut ret_words: [u8; 2] = [0, 0];
-                match self.interface.read(&mut ret_words) {
-                    Ok(_x) => Ok(
-                        InstructionResult::RNEDSIReturn(
-                            RNEDSIResult {
-                                num_errors: ret_words[1] & 0x7f,
-                                has_overflow: ( ret_words[1] & 0x80 ) > 0,
-                                additional: 0,
-                            }
-                        )
-                    ),
-                    Err(_) => Err(4),
+        self.write_command(Command::RNEDSI.into());
+        let mut ret_words: [u8; 2] = [0, 0];
+        self.read_data(&mut ret_words);
+        Ok(
+            InstructionResult::RNEDSIReturn(
+                RNEDSIResult {
+                    num_errors: ret_words[1] & 0x7f,
+                    has_overflow: ( ret_words[1] & 0x80 ) > 0,
+                    additional: 0,
                 }
-            },
-            _ => { Err(5) },
-        }
+            )
+        )
     }
 
-    // Read Number of the Errors on DSI
+    // Read Display Status
+    #[cold]
     pub fn rddst(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x05]) {
-            Ok(_x) => { 
-                let mut ret_words: [u8; 5] = [0, 0, 0, 0, 0];
-                match self.interface.read(&mut ret_words) {
-                    Ok(_x) => Ok(
-                        InstructionResult::RDDSTReturn(
-                            RDDSTResult {
-                                bston: match ret_words[1] & 0x80 {
-                                    0 => BoosterVoltageStatus::OFF,
-                                    _ => BoosterVoltageStatus::ON,
-                                },
-                                my: match ret_words[1] & 0x40 {
-                                    0 => AddressOrder::INCREMENT,
-                                    _ => AddressOrder::DECREMENT,
-                                },           
-                                mx: match ret_words[1] & 0x20 {
-                                    0 => AddressOrder::INCREMENT,
-                                    _ => AddressOrder::DECREMENT,
-                                },           
-                                mv: match ret_words[1] & 0x10 {
-                                    0 => RowColumnExchange::NORMAL,
-                                    _ => RowColumnExchange::EXCHANGE,
-                                },      
-                                ml: match ret_words[1] & 0x08 {
-                                    0 => AddressOrder::INCREMENT,
-                                    _ => AddressOrder::DECREMENT,
-                                },           
-                                rgb: match ret_words[1] & 0x04 {
-                                    0 => RgbOrder::RGB,
-                                    _ => RgbOrder::BGR,
-                                },              
-                                ifpf: match ret_words[2] & 0x70 {
-                                    0x50 => PixelFormat::Bit16,
-                                    0x60 => PixelFormat::Bit18,
-                                    0x70 => PixelFormat::Bit24,
-                                    _ => PixelFormat::Undefined,
-                                },          
-                                idmon: match ret_words[2] & 0x08 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },               
-                                ptlon: match ret_words[2] & 0x04 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },               
-                                slpout: match ret_words[2] & 0x02 {
-                                    0 => InOut::IN,
-                                    _ => InOut::OUT,
-                                },              
-                                noron: match ret_words[2] & 0x01 {
-                                    0 => DisplayMode::PARTIAL,
-                                    _ => DisplayMode::NORMAL,
-                                },         
-                                st: match ret_words[3] & 0x80 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },                  
-                                invon: match ret_words[3] & 0x20 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },               
-                                dison: match ret_words[3] & 0x04 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },               
-                                teon: match ret_words[3] & 0x02 {
-                                    0 => OnOff::OFF,
-                                    _ => OnOff::ON,
-                                },                
-                                gcsel: match ret_words[3] & 0x01 {
-                                    0 => match ret_words[4] & 0xc0 {
-                                        0x0 => GammaCurveSelect::GC0,
-                                        0x40 => GammaCurveSelect::GC1,
-                                        0x80 => GammaCurveSelect::GC2,
-                                        0xc0 => GammaCurveSelect::GC3,
-                                        _ => GammaCurveSelect::Undefined,
-                                    },
-                                    _ => GammaCurveSelect::Undefined,
-                                },
-                                tem: match ret_words[4] & 0x20 {
-                                    0 => TearingEffect::MODE1,
-                                    _ => TearingEffect::MODE2,
-                                }
-                            }
-                        )
-                    ),
-                    Err(_) => Err(4),
+        self.write_command(Command::RDDST.into());
+        let mut ret_words: [u8; 5] = [0, 0, 0, 0, 0];
+        self.read_data(&mut ret_words);
+        Ok(
+            InstructionResult::RDDSTReturn(
+                RDDSTResult {
+                    bston: match ret_words[1] & 0x80 {
+                        0 => BoosterVoltageStatus::OFF,
+                        _ => BoosterVoltageStatus::ON,
+                    },
+                    my: match ret_words[1] & 0x40 {
+                        0 => AddressOrder::INCREMENT,
+                        _ => AddressOrder::DECREMENT,
+                    },           
+                    mx: match ret_words[1] & 0x20 {
+                        0 => AddressOrder::INCREMENT,
+                        _ => AddressOrder::DECREMENT,
+                    },           
+                    mv: match ret_words[1] & 0x10 {
+                        0 => RowColumnExchange::NORMAL,
+                        _ => RowColumnExchange::EXCHANGE,
+                    },      
+                    ml: match ret_words[1] & 0x08 {
+                        0 => AddressOrder::INCREMENT,
+                        _ => AddressOrder::DECREMENT,
+                    },           
+                    rgb: match ret_words[1] & 0x04 {
+                        0 => RgbOrder::RGB,
+                        _ => RgbOrder::BGR,
+                    },              
+                    ifpf: match ret_words[2] & 0x70 {
+                        0x50 => PixelFormat::Bit16,
+                        0x60 => PixelFormat::Bit18,
+                        0x70 => PixelFormat::Bit24,
+                        _ => PixelFormat::Undefined,
+                    },          
+                    idmon: match ret_words[2] & 0x08 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },               
+                    ptlon: match ret_words[2] & 0x04 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },               
+                    slpout: match ret_words[2] & 0x02 {
+                        0 => InOut::IN,
+                        _ => InOut::OUT,
+                    },              
+                    noron: match ret_words[2] & 0x01 {
+                        0 => DisplayMode::PARTIAL,
+                        _ => DisplayMode::NORMAL,
+                    },         
+                    st: match ret_words[3] & 0x80 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },                  
+                    invon: match ret_words[3] & 0x20 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },               
+                    dison: match ret_words[3] & 0x04 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },               
+                    teon: match ret_words[3] & 0x02 {
+                        0 => OnOff::OFF,
+                        _ => OnOff::ON,
+                    },                
+                    gcsel: match ret_words[3] & 0x01 {
+                        0 => match ret_words[4] & 0xc0 {
+                            0x0 => GammaCurveSelect::GC0,
+                            0x40 => GammaCurveSelect::GC1,
+                            0x80 => GammaCurveSelect::GC2,
+                            0xc0 => GammaCurveSelect::GC3,
+                            _ => GammaCurveSelect::Undefined,
+                        },
+                        _ => GammaCurveSelect::Undefined,
+                    },
+                    tem: match ret_words[4] & 0x20 {
+                        0 => TearingEffect::MODE1,
+                        _ => TearingEffect::MODE2,
+                    }
                 }
-            },
-            _ => { Err(5) },
-        }
+            )
+        )
     }
 
     // Enter inversion off mode
     pub fn invoff(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x20]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        }
+        self.write_command(Command::INVOFF.into());
+        Ok(InstructionResult::NoReturn)
     }
 
-    // Enter inversion off mode
+    // Enter inversion on mode
     pub fn invon(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x21]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        }
+        self.write_command(Command::INVON.into());
+        Ok(InstructionResult::NoReturn)
     }
 
     // Enter display off mode
     pub fn dispoff(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x28]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        }
+        self.write_command(Command::DISPOFF.into());
+        Ok(InstructionResult::NoReturn)
     }
 
     // Enter display on mode
     pub fn dispon(&mut self) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[0x29]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        }
+        self.write_command(Command::DISPON.into());
+        Ok(InstructionResult::NoReturn)
     }
 
-    pub fn wrdisbv(&mut self, val: u8) -> Result<InstructionResult, u8> {
-        match self.interface.write(&[Command::WRDISBV as u8, val]) {
-            Ok(_x) => { Ok(InstructionResult::NoReturn) },
-            _ => { Err(1) },
-        }
+    pub fn wrdisbv(&mut self, _val: u8) -> Result<InstructionResult, u8> {
+        self.write_command(Command::WRDISBV.into());
+        Ok(InstructionResult::NoReturn)
     }
 }
